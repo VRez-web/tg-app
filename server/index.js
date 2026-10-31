@@ -1,3 +1,6 @@
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
@@ -143,6 +146,15 @@ app.get('/api/stats', async (req, res) => {
 app.get('/api/news', (_req, res) => {
   res.json([])
 })
+
+const clientDist = path.join(path.dirname(fileURLToPath(import.meta.url)), '../client/dist')
+if (fs.existsSync(clientDist)) {
+  app.use(express.static(clientDist))
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/health') return next()
+    res.sendFile(path.join(clientDist, 'index.html'))
+  })
+}
 
 cron.schedule(
   '0 20 * * *',
