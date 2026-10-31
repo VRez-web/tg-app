@@ -39,13 +39,6 @@ cp .env.example .env
 npm start        # http://localhost:3000
 ```
 
-## Деплой на Render
-
-1. Запушьте репозиторий на GitHub.
-2. Подключите репозиторий в Render.
-3. Создайте два веб-сервиса по `render.yaml` (или вручную: `server` — Node, `client` — Static Site).
-4. Укажите в @BotFather ссылку на клиент (HTTPS) как Web App URL.
-
 ## Виджет курса
 
 Подключён через `<iframe src="https://myfin.by/currency/gomel">` — отображает курс валют для региона Гомель напрямую с сайта myfin.by.
