@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: tg-mini-app-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: DATABASE_URL
+        sync: false
+
+  - type: web
+    name: tg-mini-app-client
+    runtime: static
+    plan: free
+    rootDir: client
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: VITE_API_URL
+        fromService:
+          name: tg-mini-app-server
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL

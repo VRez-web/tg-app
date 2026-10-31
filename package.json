@@ -1,0 +1,7 @@
+{
+  "name": "my-tg-mini-app",
+  "private": true,
+  "scripts": {
+    "import-json": "npm run import-json --prefix server"
+  }
+}
