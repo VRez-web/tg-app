@@ -165,23 +165,21 @@ export function PricesPage() {
         </div>
       </form>
 
+      {sources.some((source) => source.lastError) && (
+        <div className="form-error">{sources.find((source) => source.lastError)?.lastError}</div>
+      )}
       {sources.length > 0 && (
-        <div className="sources">
-          {sources.map((source) => (
-            <div key={source.id} className="source-chip">
-              <span>{source.lastCount} объявл.</span>
-              {source.lastError && <small className="err">{source.lastError}</small>}
-              <button
-                type="button"
-                onClick={() =>
-                  api.deleteSource(source.id).then(() => load(subTab)).catch((err) => setError(err.message))
-                }
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
+        <button
+          type="button"
+          className="btn btn-ghost source-remove"
+          onClick={() =>
+            Promise.all(sources.map((source) => api.deleteSource(source.id)))
+              .then(() => load(subTab))
+              .catch((err) => setError(err.message))
+          }
+        >
+          Удалить выборку
+        </button>
       )}
 
       <div className="actions">
@@ -192,6 +190,7 @@ export function PricesPage() {
           Обновить
         </button>
       </div>
+      <div className="list-meta">В базе: {listings.length}</div>
 
       {listings.length > 0 && (
         <div className="toolbar">
@@ -233,7 +232,7 @@ export function PricesPage() {
       ) : (
         <>
           <div className="list-meta">
-            {filtered.length} из {listings.length} · стр. {currentPage}/{pageCount}
+            Показано {filtered.length} · стр. {currentPage}/{pageCount}
           </div>
           {visible.map((item) => (
             <article key={item.id} className="listing-card">
