@@ -1,7 +1,9 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
-import type { Listing, Source, SubTab } from '../types'
+import type { Listing, PricesView, Source, SubTab } from '../types'
 import { Infographic } from './Infographic'
+import { ListingHistory } from './ListingHistory'
+import { ParseHistory } from './ParseHistory'
 
 function money(value: number | null) {
   if (value == null) return '—'
@@ -15,6 +17,22 @@ function meta(item: Listing) {
   return parts.join(' · ')
 }
 
+function ageLabel(iso: string | null | undefined) {
+  if (!iso) return ''
+  const day = (value: Date) =>
+    value.toLocaleDateString('en-CA', { timeZone: 'Europe/Minsk' })
+  const from = Date.parse(`${day(new Date(iso))}T00:00:00Z`)
+  const to = Date.parse(`${day(new Date())}T00:00:00Z`)
+  const days = Math.max(0, Math.round((to - from) / 86400000))
+  if (days < 1) return 'сегодня'
+  if (days < 30) return `${days}д`
+  if (days < 365) return `${Math.floor(days / 30)}м`
+  const years = Math.floor(days / 365)
+  if (years === 1) return '1 год'
+  if (years < 5) return `${years} года`
+  return `${years} лет`
+}
+
 const PAGE_SIZE = 20
 type SortKey = 'price-asc' | 'price-desc' | 'area-desc' | 'rooms-asc' | 'address'
 
@@ -24,12 +42,13 @@ function toNum(value: string) {
 }
 
 export function PricesPage() {
-  const [subTab, setSubTab] = useState<SubTab>('apartments')
+  const [subTab, setSubTab] = useState<PricesView>('apartments')
   const [url, setUrl] = useState('')
   const [category, setCategory] = useState<SubTab>('apartments')
   const [sources, setSources] = useState<Source[]>([])
   const [listings, setListings] = useState<Listing[]>([])
   const [showInfo, setShowInfo] = useState(false)
+  const [openListing, setOpenListing] = useState<Listing | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [roomsFilter, setRoomsFilter] = useState('all')
@@ -51,6 +70,7 @@ export function PricesPage() {
   }, [])
 
   useEffect(() => {
+    if (subTab === 'history') return
     const controller = new AbortController()
     setShowInfo(false)
     setError('')
@@ -123,6 +143,7 @@ export function PricesPage() {
     setLoading(true)
     setError('')
     try {
+      if (subTab === 'history') return
       await api.parse(subTab)
       await load(subTab)
     } catch (err) {
@@ -134,7 +155,7 @@ export function PricesPage() {
 
   return (
     <section className="prices-page">
-      <div className="subtabs">
+      <div className="subtabs subtabs-3">
         <button
           className={`subtab ${subTab === 'apartments' ? 'active' : ''}`}
           onClick={() => setSubTab('apartments')}
@@ -144,8 +165,15 @@ export function PricesPage() {
         <button className={`subtab ${subTab === 'other' ? 'active' : ''}`} onClick={() => setSubTab('other')}>
           Другое
         </button>
+        <button className={`subtab ${subTab === 'history' ? 'active' : ''}`} onClick={() => setSubTab('history')}>
+          История
+        </button>
       </div>
 
+      {subTab === 'history' ? <ParseHistory /> : null}
+
+      {subTab !== 'history' && (
+      <>
       <form className="add-form" onSubmit={onAdd}>
         <input
           value={url}
@@ -174,7 +202,7 @@ export function PricesPage() {
           className="btn btn-ghost source-remove"
           onClick={() =>
             Promise.all(sources.map((source) => api.deleteSource(source.id)))
-              .then(() => load(subTab))
+              .then(() => load(subTab as SubTab))
               .catch((err) => setError(err.message))
           }
         >
@@ -223,7 +251,8 @@ export function PricesPage() {
 
       {error && <div className="form-error">{error}</div>}
       {loading && <div className="muted">Загрузка…</div>}
-      {showInfo && <Infographic category={subTab} onClose={() => setShowInfo(false)} />}
+      {showInfo && <Infographic category={subTab as SubTab} onClose={() => setShowInfo(false)} />}
+      {openListing && <ListingHistory listing={openListing} onClose={() => setOpenListing(null)} />}
 
       {listings.length === 0 ? (
         <div className="empty">Добавьте URL выборки</div>
@@ -235,23 +264,11 @@ export function PricesPage() {
             Показано {filtered.length} · стр. {currentPage}/{pageCount}
           </div>
           {visible.map((item) => (
-            <article key={item.id} className="listing-card">
+            <article key={item.id} className="listing-card listing-card-open" onClick={() => setOpenListing(item)}>
               <div className="info">
                 <h4>{item.title}</h4>
                 <p>{meta(item) || 'Параметры не распознаны'}</p>
-                <div className="listing-actions">
-                  <a href={item.url} target="_blank" rel="noreferrer">
-                    Открыть
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      api.deleteListing(item.id).then(() => load(subTab)).catch((err) => setError(err.message))
-                    }
-                  >
-                    Удалить
-                  </button>
-                </div>
+                <span className="listing-age">{ageLabel(item.firstSeenAt || item.lastParsedAt)}</span>
               </div>
               <div className="price">{money(item.priceByn)}</div>
             </article>
@@ -273,6 +290,8 @@ export function PricesPage() {
             </button>
           </div>
         </>
+      )}
+      </>
       )}
     </section>
   )

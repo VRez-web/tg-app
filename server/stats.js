@@ -1,4 +1,4 @@
-import { listAllListings, listSnapshots } from './store.js'
+import { getListing, listAllListings, listListingChanges, listListingHistory, listSnapshots } from './store.js'
 import { bynToUsd } from './rates.js'
 
 const PERIODS = ['days', 'weeks', 'months', 'years']
@@ -162,5 +162,62 @@ export async function buildStats(category, usdRate, period = 'days') {
     cheapest: sorted.slice(0, 3).map(pick),
     expensive: sorted.slice(-3).reverse().map(pick),
     history,
+  }
+}
+
+function listingPeriodRange(period) {
+  const now = new Date()
+  if (period === 'weeks') {
+    const from = new Date(now)
+    from.setDate(from.getDate() - 84)
+    return { from: ymd(from), to: ymd(now) }
+  }
+  if (period === 'months') {
+    const from = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+    return { from: ymd(from), to: ymd(now) }
+  }
+  if (period === 'years') {
+    return { from: '2000-01-01', to: ymd(now) }
+  }
+  const from = new Date(now)
+  from.setDate(from.getDate() - 30)
+  return { from: ymd(from), to: ymd(now) }
+}
+
+export async function buildListingDetail(id, period = 'days') {
+  const listing = await getListing(id)
+  if (!listing) return null
+  const range = listingPeriodRange(period)
+  const points = await listListingHistory(id)
+  const inRange = points.filter((point) => point.date >= range.from && point.date <= range.to)
+  const byBucket = new Map()
+  for (const point of inRange) {
+    if (point.priceByn == null) continue
+    byBucket.set(bucket(point.date, period), point)
+  }
+  const history = [...byBucket.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, point]) => ({
+      date,
+      priceByn: point.priceByn,
+      rooms: point.rooms,
+      areaM2: point.areaM2,
+    }))
+  return {
+    listing,
+    period,
+    from: range.from,
+    to: range.to,
+    historyTitle: historyTitle(period).replace('Средняя цена', 'Цена'),
+    history,
+    points: points.map((point) => ({
+      at: point.recordedAt,
+      date: point.date,
+      priceByn: point.priceByn,
+      rooms: point.rooms,
+      areaM2: point.areaM2,
+      title: point.title,
+    })),
+    changes: await listListingChanges(id),
   }
 }
