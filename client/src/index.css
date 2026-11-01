@@ -120,6 +120,10 @@ body {
   grid-template-columns: 1fr 1fr;
 }
 
+.subtabs-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
 .period-tabs {
   grid-template-columns: repeat(4, 1fr);
 }
@@ -260,6 +264,21 @@ body {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: start;
+}
+
+.listing-card-open {
+  cursor: pointer;
+}
+
+.listing-age {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mint);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 4px 8px;
 }
 
 .listing-card .info {
@@ -409,6 +428,101 @@ body {
 .stat-list a {
   color: var(--text);
   overflow-wrap: anywhere;
+}
+
+.history-list,
+.history-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-run {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-run-head {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: start;
+  padding: 0;
+}
+
+.history-run-head strong,
+.history-run-head span,
+.history-item b,
+.history-item p {
+  display: block;
+}
+
+.history-run-head strong {
+  font-size: 15px;
+  letter-spacing: -0.03em;
+}
+
+.history-run-head span,
+.history-run-head em,
+.history-item p {
+  font-size: 12px;
+  color: var(--muted);
+  font-style: normal;
+}
+
+.history-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.history-stats span {
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--surface-2);
+}
+
+.history-stats .ok {
+  color: var(--mint);
+}
+
+.history-stats .upd {
+  color: var(--accent);
+}
+
+.history-stats .del {
+  color: var(--danger);
+}
+
+.history-group h4 {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.history-item a {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .empty {

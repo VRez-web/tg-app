@@ -17,6 +17,8 @@ export const api = {
     request<import('./types').Source[]>(`/api/sources?category=${category}`, { signal }),
   listings: (category: string, signal?: AbortSignal) =>
     request<import('./types').Listing[]>(`/api/listings?category=${category}`, { signal }),
+  listing: (id: string, period = 'days') =>
+    request<import('./types').ListingDetail>(`/api/listings/${id}?period=${period}`),
   stats: (category: string, period = 'days') =>
     request<import('./types').Stats>(`/api/stats?category=${category}&period=${period}`),
   addSource: (url: string, category: string) =>
@@ -31,4 +33,5 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ category }),
     }),
+  parseRuns: (signal?: AbortSignal) => request<import('./types').ParseRun[]>('/api/parse-runs', { signal }),
 }

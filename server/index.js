@@ -9,16 +9,20 @@ import { ensureSchema, hasDatabase, pingDb } from './db.js'
 import {
   addSource,
   applyParse,
+  backfillParseRuns,
   deleteListing,
   deleteSource,
+  finishParseRun,
   getSource,
   importJsonFile,
   listListings,
+  listParseRuns,
   listSources,
+  startParseRun,
 } from './store.js'
 import { parseSource } from './parser.js'
 import { getRates, getUsdRate } from './rates.js'
-import { buildStats, normalizePeriod } from './stats.js'
+import { buildListingDetail, buildStats, normalizePeriod } from './stats.js'
 
 dotenv.config()
 
@@ -41,25 +45,56 @@ function normalizeCategory(raw) {
   return raw === 'other' ? 'other' : 'apartments'
 }
 
-async function parseOne(source) {
+async function parseOne(source, runId) {
   const { rate } = await getUsdRate().catch(() => ({ rate: null }))
   try {
     const items = await parseSource(source.url, rate, source.category)
-    await applyParse(source.id, items, items.length ? null : 'Не удалось извлечь объявления')
+    await applyParse(source.id, items, items.length ? null : 'Не удалось извлечь объявления', runId)
     return { sourceId: source.id, count: items.length }
   } catch (error) {
-    await applyParse(source.id, [], error.message)
+    await applyParse(source.id, [], error.message, runId)
     return { sourceId: source.id, count: 0, error: error.message }
   }
 }
 
-async function parseAll(category) {
+async function parseAll(category, runId) {
   const sources = await listSources(category)
   const results = []
   for (const source of sources) {
-    results.push(await parseOne(source))
+    results.push(await parseOne(source, runId))
   }
   return results
+}
+
+async function withParseRun(trigger, category, work) {
+  let run = null
+  try {
+    run = await startParseRun({ trigger, category })
+  } catch (error) {
+    console.error('[parse-history] start failed', error)
+  }
+  try {
+    const result = await work(run?.id)
+    if (run) {
+      const error = Array.isArray(result)
+        ? result.map((item) => item.error).filter(Boolean).join('; ') || null
+        : result?.error || null
+      await finishParseRun(run.id, { error }).catch((err) => console.error('[parse-history] finish failed', err))
+    }
+    return result
+  } catch (error) {
+    if (run) {
+      await finishParseRun(run.id, { error: error.message }).catch((err) =>
+        console.error('[parse-history] finish failed', err),
+      )
+    }
+    throw error
+  }
+}
+
+async function runParse({ trigger, category }) {
+  const results = await withParseRun(trigger, category, (runId) => parseAll(category, runId))
+  return { results }
 }
 
 app.get('/health', async (_req, res) => {
@@ -100,7 +135,7 @@ app.post('/api/sources', async (req, res) => {
     const url = normalizeUrl(req.body?.url)
     const category = normalizeCategory(req.body?.category)
     const source = await addSource(url, category)
-    const parsed = await parseOne(source)
+    const parsed = await withParseRun('manual', category, (runId) => parseOne(source, runId))
     const listings = (await listListings(category)).filter((l) => l.sourceId === source.id)
     res.status(201).json({
       source: await getSource(source.id),
@@ -121,6 +156,16 @@ app.get('/api/listings', async (req, res) => {
   res.json(await listListings(req.query.category))
 })
 
+app.get('/api/listings/:id', async (req, res) => {
+  try {
+    const detail = await buildListingDetail(req.params.id, normalizePeriod(req.query.period))
+    if (!detail) return res.status(404).json({ error: 'Объявление не найдено' })
+    res.json(detail)
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
 app.delete('/api/listings/:id', async (req, res) => {
   await deleteListing(req.params.id)
   res.status(204).end()
@@ -128,8 +173,16 @@ app.delete('/api/listings/:id', async (req, res) => {
 
 app.post('/api/parse', async (req, res) => {
   const category = req.body?.category ? normalizeCategory(req.body.category) : undefined
-  const results = await parseAll(category)
+  const { results } = await runParse({ trigger: 'manual', category })
   res.json({ results })
+})
+
+app.get('/api/parse-runs', async (_req, res) => {
+  try {
+    res.json(await listParseRuns())
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
 })
 
 app.get('/api/stats', async (req, res) => {
@@ -159,7 +212,10 @@ if (fs.existsSync(clientDist)) {
 cron.schedule(
   '0 20 * * *',
   () => {
-    parseAll().catch((error) => console.error('daily parse failed', error))
+    console.log('[cron] daily parse started')
+    runParse({ trigger: 'cron' })
+      .then(({ results }) => console.log('[cron] daily parse done', results))
+      .catch((error) => console.error('[cron] daily parse failed', error))
   },
   { timezone: 'Europe/Minsk' },
 )
@@ -174,6 +230,7 @@ app.listen(PORT, async () => {
   if (!hasDatabase()) return
   try {
     await ensureSchema()
+    await backfillParseRuns().catch((error) => console.error('[parse-history] backfill failed', error))
     const imported = await importJsonFile()
     if (imported.imported) console.log('[import]', imported)
   } catch (error) {
