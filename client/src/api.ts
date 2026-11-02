@@ -17,10 +17,10 @@ export const api = {
     request<import('./types').Source[]>(`/api/sources?category=${category}`, { signal }),
   listings: (category: string, signal?: AbortSignal) =>
     request<import('./types').Listing[]>(`/api/listings?category=${category}`, { signal }),
-  listing: (id: string, period = 'days') =>
-    request<import('./types').ListingDetail>(`/api/listings/${id}?period=${period}`),
-  stats: (category: string, period = 'days') =>
-    request<import('./types').Stats>(`/api/stats?category=${category}&period=${period}`),
+  listing: (id: string, period = 'days', signal?: AbortSignal) =>
+    request<import('./types').ListingDetail>(`/api/listings/${id}?period=${period}`, { signal }),
+  stats: (category: string, period = 'days', signal?: AbortSignal) =>
+    request<import('./types').Stats>(`/api/stats?category=${category}&period=${period}`, { signal }),
   addSource: (url: string, category: string) =>
     request<{ source: import('./types').Source }>('/api/sources', {
       method: 'POST',

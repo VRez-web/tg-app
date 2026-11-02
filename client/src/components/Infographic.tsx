@@ -75,13 +75,23 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
   }, [onClose])
 
   useEffect(() => {
+    const controller = new AbortController()
     setLoading(true)
     setError('')
     api
-      .stats(category, period)
-      .then(setStats)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Не удалось посчитать статистику'))
-      .finally(() => setLoading(false))
+      .stats(category, period, controller.signal)
+      .then((next) => {
+        if (controller.signal.aborted) return
+        setStats(next)
+      })
+      .catch((err) => {
+        if (err instanceof Error && err.name === 'AbortError') return
+        setError(err instanceof Error ? err.message : 'Не удалось посчитать статистику')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
   }, [category, period])
 
   const roomData = (stats?.byRooms || []).map((row) => ({

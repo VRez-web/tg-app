@@ -172,9 +172,13 @@ app.delete('/api/listings/:id', async (req, res) => {
 })
 
 app.post('/api/parse', async (req, res) => {
-  const category = req.body?.category ? normalizeCategory(req.body.category) : undefined
-  const { results } = await runParse({ trigger: 'manual', category })
-  res.json({ results })
+  try {
+    const category = req.body?.category ? normalizeCategory(req.body.category) : undefined
+    const { results } = await runParse({ trigger: 'manual', category })
+    res.json({ results })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
 })
 
 app.get('/api/parse-runs', async (_req, res) => {

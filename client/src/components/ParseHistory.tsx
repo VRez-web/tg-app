@@ -44,6 +44,14 @@ function changeText(change: ParseChange) {
   return money(change.action === 'removed' ? change.oldPriceByn : change.newPriceByn)
 }
 
+function changePriceClass(change: ParseChange) {
+  if (change.action !== 'updated') return ''
+  if (change.oldPriceByn == null || change.newPriceByn == null) return ''
+  if (change.newPriceByn > change.oldPriceByn) return 'price-up'
+  if (change.newPriceByn < change.oldPriceByn) return 'price-down'
+  return ''
+}
+
 export function ParseHistory() {
   const [runs, setRuns] = useState<ParseRun[]>([])
   const [openId, setOpenId] = useState<string | null>(null)
@@ -55,14 +63,18 @@ export function ParseHistory() {
     api
       .parseRuns(controller.signal)
       .then((next) => {
+        if (controller.signal.aborted) return
         setRuns(next)
-        setOpenId(next[0]?.id || null)
       })
       .catch((err) => {
         if (err instanceof Error && err.name === 'AbortError') return
-        setError(err instanceof Error ? err.message : 'Не удалось загрузить историю')
+        if (!controller.signal.aborted) {
+          setError(err instanceof Error ? err.message : 'Не удалось загрузить историю')
+        }
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
     return () => controller.abort()
   }, [])
 
@@ -94,7 +106,7 @@ export function ParseHistory() {
               <span className="del">−{run.removedCount}</span>
             </div>
             {run.error && <div className="form-error">{run.error}</div>}
-            {!run.changes.length && (
+            {open && !run.changes.length && (
               <p className="muted">
                 {run.addedCount + run.updatedCount + run.removedCount === 0
                   ? 'Состав выборки не изменился, либо прогон записан без детализации.'
@@ -111,7 +123,7 @@ export function ParseHistory() {
                       {ACTION_LABEL[action]} · {items.length}
                     </h4>
                     {items.slice(0, 40).map((change) => (
-                      <div key={change.id} className={`history-item ${action}`}>
+                      <div key={change.id} className={`history-item ${action} ${changePriceClass(change)}`}>
                         <div>
                           <b>{change.title || 'Без адреса'}</b>
                           <p>{changeText(change)}</p>

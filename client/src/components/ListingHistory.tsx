@@ -47,20 +47,32 @@ export function ListingHistory({ listing, onClose }: { listing: Listing; onClose
   }, [onClose])
 
   useEffect(() => {
+    const controller = new AbortController()
     setLoading(true)
     setError('')
     api
-      .listing(listing.id, period)
-      .then(setDetail)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Не удалось загрузить историю'))
-      .finally(() => setLoading(false))
+      .listing(listing.id, period, controller.signal)
+      .then((next) => {
+        if (controller.signal.aborted) return
+        setDetail(next)
+      })
+      .catch((err) => {
+        if (err instanceof Error && err.name === 'AbortError') return
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить историю')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
   }, [listing.id, period])
 
   const current = detail?.listing || listing
-  const chart = (detail?.history || []).map((row) => ({
-    date: row.date.length > 7 ? row.date.slice(5) : row.date,
-    byn: row.priceByn || 0,
-  }))
+  const chart = (detail?.history || [])
+    .filter((row) => row.priceByn != null)
+    .map((row) => ({
+      date: row.date.length > 7 ? row.date.slice(5) : row.date,
+      byn: row.priceByn as number,
+    }))
   const points = [...(detail?.points || [])].reverse()
 
   return (
