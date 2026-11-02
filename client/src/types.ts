@@ -36,6 +36,7 @@ export interface Listing {
   active: boolean
   firstSeenAt: string
   lastParsedAt: string
+  priceChange: 'up' | 'down' | null
 }
 
 export interface StatsItem {

@@ -41,7 +41,8 @@ function periodRange(period) {
   if (period === 'years') {
     return { from: '2000-01-01', to: ymd(now) }
   }
-  const from = new Date(now.getFullYear(), now.getMonth(), 1)
+  const from = new Date(now)
+  from.setDate(from.getDate() - 30)
   return { from: ymd(from), to: ymd(now) }
 }
 

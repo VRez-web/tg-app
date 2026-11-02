@@ -315,8 +315,18 @@ body {
 .listing-card .price {
   font-size: 15px;
   font-weight: 800;
-  color: var(--mint);
+  color: var(--text);
   white-space: nowrap;
+}
+
+.listing-card .price-up,
+.history-item.price-up p {
+  color: var(--danger);
+}
+
+.listing-card .price-down,
+.history-item.price-down p {
+  color: var(--mint);
 }
 
 .stat-grid,

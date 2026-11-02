@@ -152,6 +152,13 @@ function mapSource(row) {
   }
 }
 
+function priceChange(current, previous) {
+  const next = num(current)
+  const prev = num(previous)
+  if (next == null || prev == null || next === prev) return null
+  return next > prev ? 'up' : 'down'
+}
+
 function mapListing(row) {
   return {
     id: row.id,
@@ -161,12 +168,13 @@ function mapListing(row) {
     category: row.category,
     title: row.title,
     rooms: row.rooms == null ? null : Number(row.rooms),
-    areaM2: num(row.area_m2),
-    priceByn: num(row.price_byn),
+    areaM2: num(row.area_m2 ?? row.areaM2),
+    priceByn: num(row.price_byn ?? row.priceByn),
     image: row.image ?? null,
     active: Boolean(row.active),
     firstSeenAt: iso(row.first_seen_at || row.firstSeenAt) || iso(row.last_parsed_at || row.lastParsedAt),
     lastParsedAt: iso(row.last_parsed_at || row.lastParsedAt),
+    priceChange: row.priceChange || priceChange(row.price_byn ?? row.priceByn, row.prev_price_byn ?? row.prevPriceByn),
   }
 }
 
@@ -211,8 +219,28 @@ async function deleteSourceSql(id) {
 async function listListingsSql(category) {
   const sql = useSql()
   const rows = category
-    ? await sql`select * from listings where active and category = ${category} order by price_byn asc nulls last`
-    : await sql`select * from listings where active order by price_byn asc nulls last`
+    ? await sql`
+        select l.*, (
+          select h.price_byn from listing_history h
+          where h.listing_id = l.id
+          order by h.recorded_at desc
+          offset 1 limit 1
+        ) as prev_price_byn
+        from listings l
+        where l.active and l.category = ${category}
+        order by l.price_byn asc nulls last
+      `
+    : await sql`
+        select l.*, (
+          select h.price_byn from listing_history h
+          where h.listing_id = l.id
+          order by h.recorded_at desc
+          offset 1 limit 1
+        ) as prev_price_byn
+        from listings l
+        where l.active
+        order by l.price_byn asc nulls last
+      `
   return rows.map(mapListing)
 }
 
@@ -250,6 +278,7 @@ async function applyParseSql(sourceId, items, error, runId) {
     const upserted = []
     const seen = new Set()
     const changes = []
+    const historyPoints = []
     for (const item of items) {
       if (!item.url) continue
       const url = normalizeListingUrl(item.url)
@@ -320,10 +349,14 @@ async function applyParseSql(sourceId, items, error, runId) {
           area_m2 = excluded.area_m2,
           category = excluded.category
       `
-      await tx`
-        insert into listing_history (listing_id, recorded_at, price_byn, rooms, area_m2, title)
-        values (${listing.id}, ${now}, ${listing.price_byn}, ${listing.rooms}, ${listing.area_m2}, ${listing.title})
-      `
+      historyPoints.push({
+        listingId: listing.id,
+        recordedAt: now,
+        priceByn: listing.price_byn,
+        rooms: listing.rooms,
+        areaM2: listing.area_m2,
+        title: listing.title,
+      })
     }
 
     for (const prev of before) {
@@ -333,9 +366,14 @@ async function applyParseSql(sourceId, items, error, runId) {
     }
 
     await tx`delete from snapshots where date < ${snapshotCutoff()}`
-    return { listings: upserted, changes, parsedCount: items.length, error: null }
+    return { listings: upserted, changes, historyPoints, parsedCount: items.length, error: null }
   })
 
+  try {
+    await appendListingHistorySql(result.historyPoints || [])
+  } catch (err) {
+    console.error('[listing-history] append failed', err)
+  }
   if (runId) {
     try {
       await appendParseRunSql(runId, result)
@@ -344,6 +382,20 @@ async function applyParseSql(sourceId, items, error, runId) {
     }
   }
   return result.listings
+}
+
+async function appendListingHistorySql(points) {
+  if (!points.length) return
+  const sql = useSql()
+  for (const point of points) {
+    await sql`
+      insert into listing_history (listing_id, recorded_at, price_byn, rooms, area_m2, title)
+      values (
+        ${point.listingId}, ${point.recordedAt}, ${point.priceByn},
+        ${point.rooms}, ${point.areaM2}, ${point.title}
+      )
+    `
+  }
 }
 
 async function listSnapshotsSql(category) {
@@ -390,10 +442,19 @@ function deleteSourceJson(id) {
   saveJson(data)
 }
 
+function prevPriceFromHistory(data, listingId) {
+  const points = (data.listingHistory || [])
+    .filter((row) => row.listingId === listingId)
+    .sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt)))
+  return points[1]?.priceByn ?? null
+}
+
 function listListingsJson(category) {
-  return loadJson()
-    .listings.filter((l) => (!category || l.category === category) && l.active)
+  const data = loadJson()
+  return data.listings
+    .filter((l) => (!category || l.category === category) && l.active)
     .sort((a, b) => (a.priceByn ?? Infinity) - (b.priceByn ?? Infinity))
+    .map((listing) => mapListing({ ...listing, prevPriceByn: prevPriceFromHistory(data, listing.id) }))
 }
 
 function listAllListingsJson(category) {

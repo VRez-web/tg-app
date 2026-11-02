@@ -270,7 +270,13 @@ export function PricesPage() {
                 <p>{meta(item) || 'Параметры не распознаны'}</p>
                 <span className="listing-age">{ageLabel(item.firstSeenAt || item.lastParsedAt)}</span>
               </div>
-              <div className="price">{money(item.priceByn)}</div>
+              <div
+                className={`price${
+                  item.priceChange === 'up' ? ' price-up' : item.priceChange === 'down' ? ' price-down' : ''
+                }`}
+              >
+                {money(item.priceByn)}
+              </div>
             </article>
           ))}
           <div className="pager">
