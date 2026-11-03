@@ -21,10 +21,29 @@ export const api = {
     request<import('./types').ListingDetail>(`/api/listings/${id}?period=${period}`, { signal }),
   stats: (category: string, period = 'days', signal?: AbortSignal) =>
     request<import('./types').Stats>(`/api/stats?category=${category}&period=${period}`, { signal }),
-  addSource: (url: string, category: string) =>
+  addSource: (
+    url: string,
+    category: string,
+    extras: { name?: string; priceThreshold?: number; parseHour?: number; parseMinute?: number } = {},
+  ) =>
     request<{ source: import('./types').Source }>('/api/sources', {
       method: 'POST',
-      body: JSON.stringify({ url, category }),
+      body: JSON.stringify({ url, category, ...extras }),
+    }),
+  updateSource: (
+    id: string,
+    extras: {
+      name?: string
+      url?: string
+      priceThreshold?: number
+      parseHour?: number
+      parseMinute?: number
+      active?: boolean
+    },
+  ) =>
+    request<import('./types').Source>(`/api/sources/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(extras),
     }),
   deleteSource: (id: string) => request<void>(`/api/sources/${id}`, { method: 'DELETE' }),
   deleteListing: (id: string) => request<void>(`/api/listings/${id}`, { method: 'DELETE' }),
