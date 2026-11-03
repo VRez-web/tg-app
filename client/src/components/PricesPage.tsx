@@ -1,6 +1,7 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import type { Listing, PricesView, Source, SubTab } from '../types'
+import { AddParserModal } from './AddParserModal'
 import { Infographic } from './Infographic'
 import { ListingHistory } from './ListingHistory'
 import { ParseHistory } from './ParseHistory'
@@ -43,13 +44,13 @@ function toNum(value: string) {
 
 export function PricesPage() {
   const [subTab, setSubTab] = useState<PricesView>('apartments')
-  const [url, setUrl] = useState('')
-  const [category, setCategory] = useState<SubTab>('apartments')
   const [sources, setSources] = useState<Source[]>([])
   const [listings, setListings] = useState<Listing[]>([])
+  const [showAdd, setShowAdd] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const [openListing, setOpenListing] = useState<Listing | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
   const [roomsFilter, setRoomsFilter] = useState('all')
   const [priceFrom, setPriceFrom] = useState('')
@@ -67,6 +68,7 @@ export function PricesPage() {
     if (signal?.aborted) return
     setSources(nextSources)
     setListings(nextListings)
+    setReady(true)
   }, [])
 
   useEffect(() => {
@@ -81,28 +83,20 @@ export function PricesPage() {
     setAreaFrom('')
     setAreaTo('')
     setSort('price-asc')
-    load(subTab, controller.signal).catch((err) => {
-      if (err instanceof Error && err.name === 'AbortError') return
-      setError(err instanceof Error ? err.message : 'Не удалось загрузить')
-    })
+    setReady(false)
+    setLoading(true)
+    setListings([])
+    load(subTab, controller.signal)
+      .catch((err) => {
+        if (err instanceof Error && err.name === 'AbortError') return
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить')
+        setReady(true)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
     return () => controller.abort()
   }, [load, subTab])
-
-  async function onAdd(event: FormEvent) {
-    event.preventDefault()
-    setLoading(true)
-    setError('')
-    try {
-      await api.addSource(url, category)
-      setUrl('')
-      if (category === subTab) await load(category)
-      else setSubTab(category)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось добавить')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const filtered = useMemo(() => {
     const minPrice = toNum(priceFrom)
@@ -174,45 +168,16 @@ export function PricesPage() {
 
       {subTab !== 'history' && (
       <>
-      <form className="add-form" onSubmit={onAdd}>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="Вставьте URL выборки"
-          required
-          inputMode="url"
-        />
-        <div className="add-form-row">
-          <select value={category} onChange={(e) => setCategory(e.target.value as SubTab)}>
-            <option value="apartments">Квартиры</option>
-            <option value="other">Другое</option>
-          </select>
-          <button type="submit" className="btn" disabled={loading}>
-            Добавить
-          </button>
-        </div>
-      </form>
-
       {sources.some((source) => source.lastError) && (
         <div className="form-error">{sources.find((source) => source.lastError)?.lastError}</div>
       )}
-      {sources.length > 0 && (
-        <button
-          type="button"
-          className="btn btn-ghost source-remove"
-          onClick={() =>
-            Promise.all(sources.map((source) => api.deleteSource(source.id)))
-              .then(() => load(subTab as SubTab))
-              .catch((err) => setError(err.message))
-          }
-        >
-          Удалить выборку
-        </button>
-      )}
 
-      <div className="actions">
+      <div className="actions actions-3">
+        <button type="button" className="btn" onClick={() => setShowAdd(true)} disabled={loading}>
+          Добавить парсер
+        </button>
         <button type="button" className="btn" onClick={() => setShowInfo(true)} disabled={loading}>
-          Сформировать инфографику
+          Инфографика
         </button>
         <button type="button" className="btn btn-ghost" onClick={onRefresh} disabled={loading}>
           Обновить
@@ -251,11 +216,18 @@ export function PricesPage() {
 
       {error && <div className="form-error">{error}</div>}
       {loading && <div className="muted">Загрузка…</div>}
+      {showAdd && (
+        <AddParserModal
+          category={subTab as SubTab}
+          onClose={() => setShowAdd(false)}
+          onAdded={() => load(subTab as SubTab)}
+        />
+      )}
       {showInfo && <Infographic category={subTab as SubTab} onClose={() => setShowInfo(false)} />}
       {openListing && <ListingHistory listing={openListing} onClose={() => setOpenListing(null)} />}
 
-      {listings.length === 0 ? (
-        <div className="empty">Добавьте URL выборки</div>
+      {!ready ? null : listings.length === 0 ? (
+        <div className="empty">Добавьте парсер</div>
       ) : filtered.length === 0 ? (
         <div className="empty">Нет объявлений по фильтрам</div>
       ) : (

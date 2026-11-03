@@ -40,6 +40,8 @@ body {
 }
 
 .app-header {
+  position: relative;
+  z-index: 1;
   padding: calc(10px + var(--safe-t)) 12px 10px;
   background: rgba(11, 16, 23, 0.94);
   border-bottom: 1px solid var(--line);
@@ -155,6 +157,14 @@ body {
 .add-form-row,
 .actions {
   grid-template-columns: 1fr 1fr;
+}
+
+.actions-3 {
+  grid-template-columns: 1.15fr 1fr 0.85fr;
+}
+
+.top-tabs {
+  width: 100%;
 }
 
 .toolbar {
@@ -362,7 +372,7 @@ body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 100;
   background: rgba(5, 8, 12, 0.78);
   display: flex;
   align-items: stretch;
@@ -548,11 +558,132 @@ body {
   padding: 16px;
 }
 
+.news-page,
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.news-card,
+.settings-block,
+.parser-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.news-card h3,
+.settings-block h3 {
+  font-size: 16px;
+  letter-spacing: -0.03em;
+}
+
+.news-card p,
+.parser-body p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.news-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.parser-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.parser-head {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 12px;
+  min-height: 48px;
+}
+
+.parser-head span {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.parser-body {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.parser-body a {
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.parser-body b {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.parser-form,
+.field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.parser-form {
+  padding: 0 12px 12px;
+}
+
+.field-label {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.parser-form input,
+.field-label input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  font: inherit;
+  font-size: 16px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 @media (min-width: 560px) {
   .app-header {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
+  }
+
+  .top-tabs {
+    flex: 1 0 100%;
   }
 
   .header-rates {

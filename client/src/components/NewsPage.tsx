@@ -2,7 +2,7 @@ import { NEWS } from '../data'
 
 export function NewsPage() {
   return (
-    <section className="content">
+    <section className="news-page">
       {NEWS.map((item) => (
         <article key={item.id} className="news-card">
           <h3>{item.title}</h3>

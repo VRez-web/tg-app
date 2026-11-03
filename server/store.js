@@ -140,15 +140,66 @@ function changeRow(action, listing, prev = null, next = null) {
   }
 }
 
+function sourceNameFromUrl(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return 'Парсер'
+  }
+}
+
+function normalizeThreshold(raw) {
+  if (raw == null || String(raw).trim() === '') return 200
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return 200
+  return Math.round(n)
+}
+
+function normalizeHour(raw, fallback = 20) {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return fallback
+  const hour = Math.round(n)
+  return hour >= 0 && hour <= 23 ? hour : fallback
+}
+
+function normalizeMinute(raw, fallback = 0) {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return fallback
+  const minute = Math.round(n)
+  return minute >= 0 && minute <= 59 ? minute : fallback
+}
+
+function isEmptyRun(row) {
+  return (
+    !(Number(row.parsed_count ?? row.parsedCount) || 0) &&
+    !(Number(row.added_count ?? row.addedCount) || 0) &&
+    !(Number(row.updated_count ?? row.updatedCount) || 0) &&
+    !(Number(row.removed_count ?? row.removedCount) || 0) &&
+    !row.error
+  )
+}
+
+function belowPriceThreshold(oldPrice, newPrice, threshold) {
+  const prev = num(oldPrice)
+  const next = num(newPrice)
+  if (prev == null || next == null) return false
+  return Math.abs(next - prev) < normalizeThreshold(threshold)
+}
+
 function mapSource(row) {
   return {
     id: row.id,
     url: row.url,
+    name: row.name || sourceNameFromUrl(row.url),
     category: row.category,
-    createdAt: iso(row.created_at),
-    lastParsedAt: iso(row.last_parsed_at),
-    lastError: row.last_error ?? null,
-    lastCount: Number(row.last_count) || 0,
+    priceThreshold: Number(row.price_threshold ?? row.priceThreshold) || 200,
+    active: row.active !== false,
+    parseHour: normalizeHour(row.parse_hour ?? row.parseHour, 20),
+    parseMinute: normalizeMinute(row.parse_minute ?? row.parseMinute, 0),
+    createdAt: iso(row.created_at || row.createdAt),
+    lastParsedAt: iso(row.last_parsed_at || row.lastParsedAt),
+    lastError: row.last_error ?? row.lastError ?? null,
+    lastCount: Number(row.last_count ?? row.lastCount) || 0,
   }
 }
 
@@ -202,42 +253,86 @@ async function getSourceSql(id) {
   return row ? mapSource(row) : null
 }
 
-async function addSourceSql(url, category) {
+async function addSourceSql(url, category, extras = {}) {
   const sql = useSql()
   const [existing] = await sql`select * from sources where url = ${url} and category = ${category}`
   if (existing) return mapSource(existing)
+  const name = String(extras.name || '').trim() || sourceNameFromUrl(url)
+  const priceThreshold = normalizeThreshold(extras.priceThreshold)
+  const parseHour = normalizeHour(extras.parseHour, 20)
+  const parseMinute = normalizeMinute(extras.parseMinute, 0)
   const [row] = await sql`
-    insert into sources (url, category) values (${url}, ${category}) returning *
+    insert into sources (url, category, name, price_threshold, parse_hour, parse_minute)
+    values (${url}, ${category}, ${name}, ${priceThreshold}, ${parseHour}, ${parseMinute})
+    returning *
+  `
+  return mapSource(row)
+}
+
+async function updateSourceSql(id, extras = {}) {
+  const sql = useSql()
+  const [current] = await sql`select * from sources where id = ${id}`
+  if (!current) return null
+  const url = extras.url != null ? String(extras.url).trim() : current.url
+  if (!url) throw new Error('Укажите URL')
+  if (url !== current.url) {
+    const [dup] = await sql`select id from sources where url = ${url} and category = ${current.category} and id <> ${id}`
+    if (dup) throw new Error('Такой URL уже есть в этой категории')
+  }
+  const name = extras.name != null ? String(extras.name).trim() || sourceNameFromUrl(url) : current.name
+  const priceThreshold =
+    extras.priceThreshold != null ? normalizeThreshold(extras.priceThreshold) : current.price_threshold
+  const parseHour = extras.parseHour != null ? normalizeHour(extras.parseHour, current.parse_hour) : current.parse_hour
+  const parseMinute =
+    extras.parseMinute != null ? normalizeMinute(extras.parseMinute, current.parse_minute) : current.parse_minute
+  const active = extras.active != null ? Boolean(extras.active) : current.active
+  const [row] = await sql`
+    update sources
+    set url = ${url}, name = ${name}, price_threshold = ${priceThreshold},
+        parse_hour = ${parseHour}, parse_minute = ${parseMinute}, active = ${active}
+    where id = ${id}
+    returning *
   `
   return mapSource(row)
 }
 
 async function deleteSourceSql(id) {
-  await useSql()`delete from sources where id = ${id}`
+  const [row] = await useSql()`update sources set active = false where id = ${id} returning *`
+  return row ? mapSource(row) : null
 }
 
 async function listListingsSql(category) {
   const sql = useSql()
   const rows = category
     ? await sql`
-        select l.*, (
-          select h.price_byn from listing_history h
-          where h.listing_id = l.id
-          order by h.recorded_at desc
-          offset 1 limit 1
-        ) as prev_price_byn
+        with prev as (
+          select listing_id, price_byn
+          from (
+            select listing_id, price_byn,
+              row_number() over (partition by listing_id order by recorded_at desc) as rn
+            from listing_history
+          ) ranked
+          where rn = 2
+        )
+        select l.*, p.price_byn as prev_price_byn
         from listings l
+        left join prev p on p.listing_id = l.id
         where l.active and l.category = ${category}
         order by l.price_byn asc nulls last
       `
     : await sql`
-        select l.*, (
-          select h.price_byn from listing_history h
-          where h.listing_id = l.id
-          order by h.recorded_at desc
-          offset 1 limit 1
-        ) as prev_price_byn
+        with prev as (
+          select listing_id, price_byn
+          from (
+            select listing_id, price_byn,
+              row_number() over (partition by listing_id order by recorded_at desc) as rn
+            from listing_history
+          ) ranked
+          where rn = 2
+        )
+        select l.*, p.price_byn as prev_price_byn
         from listings l
+        left join prev p on p.listing_id = l.id
         where l.active
         order by l.price_byn asc nulls last
       `
@@ -291,10 +386,18 @@ async function applyParseSql(sourceId, items, error, runId) {
 
       let listing = null
       if (externalId) {
-        ;[listing] = await tx`select * from listings where external_id = ${externalId} limit 1`
+        ;[listing] = await tx`
+          select * from listings
+          where external_id = ${externalId} and category = ${source.category}
+          limit 1
+        `
       }
       if (!listing) {
-        ;[listing] = await tx`select * from listings where url = ${url} limit 1`
+        ;[listing] = await tx`
+          select * from listings
+          where url = ${url} and category = ${source.category}
+          limit 1
+        `
       }
 
       if (!listing) {
@@ -311,22 +414,23 @@ async function applyParseSql(sourceId, items, error, runId) {
         upserted.push(mapped)
       } else {
         const prev = beforeById.get(listing.id) || listing
+        const skipPrice = belowPriceThreshold(prev.price_byn ?? prev.priceByn, priceByn, source.price_threshold)
         const next = {
           title,
           rooms: rooms ?? listing.rooms,
           areaM2: areaM2 ?? listing.area_m2,
-          priceByn: priceByn ?? listing.price_byn,
+          priceByn: skipPrice ? num(prev.price_byn ?? prev.priceByn) : priceByn ?? listing.price_byn,
         }
         ;[listing] = await tx`
           update listings set
-            source_id = ${sourceId},
+            source_id = ${listing.source_id},
             external_id = ${externalId || listing.external_id},
             url = ${url},
             category = ${source.category},
             title = ${title},
             rooms = ${rooms ?? listing.rooms},
             area_m2 = ${areaM2 ?? listing.area_m2},
-            price_byn = ${priceByn ?? listing.price_byn},
+            price_byn = ${next.priceByn},
             image = ${image ?? listing.image},
             active = true,
             last_parsed_at = ${now}
@@ -334,10 +438,31 @@ async function applyParseSql(sourceId, items, error, runId) {
           returning *
         `
         const mapped = mapListing(listing)
+        const recordHistory = !prev.active || (!skipPrice && listingChanged(prev, next))
         if (!prev.active) changes.push(changeRow('added', mapped, prev, next))
-        else if (listingChanged(prev, next)) changes.push(changeRow('updated', mapped, prev, next))
+        else if (!skipPrice && listingChanged(prev, next)) changes.push(changeRow('updated', mapped, prev, next))
         seen.add(listing.id)
         upserted.push(mapped)
+        if (recordHistory) {
+          historyPoints.push({
+            listingId: listing.id,
+            recordedAt: now,
+            priceByn: listing.price_byn,
+            rooms: listing.rooms,
+            areaM2: listing.area_m2,
+            title: listing.title,
+          })
+        }
+        await tx`
+          insert into snapshots (listing_id, date, price_byn, rooms, area_m2, category)
+          values (${listing.id}, ${date}, ${listing.price_byn}, ${listing.rooms}, ${listing.area_m2}, ${listing.category})
+          on conflict (listing_id, date) do update set
+            price_byn = excluded.price_byn,
+            rooms = excluded.rooms,
+            area_m2 = excluded.area_m2,
+            category = excluded.category
+        `
+        continue
       }
 
       await tx`
@@ -408,21 +533,28 @@ async function listSnapshotsSql(category) {
 
 function listSourcesJson(category) {
   const data = loadJson()
-  return category ? data.sources.filter((s) => s.category === category) : data.sources
+  const rows = category ? data.sources.filter((s) => s.category === category) : data.sources
+  return rows.map(mapSource)
 }
 
 function getSourceJson(id) {
-  return loadJson().sources.find((s) => s.id === id) || null
+  const row = loadJson().sources.find((s) => s.id === id)
+  return row ? mapSource(row) : null
 }
 
-function addSourceJson(url, category) {
+function addSourceJson(url, category, extras = {}) {
   const data = loadJson()
   const existing = data.sources.find((s) => s.url === url && s.category === category)
-  if (existing) return existing
+  if (existing) return mapSource(existing)
   const source = {
     id: randomUUID(),
     url,
+    name: String(extras.name || '').trim() || sourceNameFromUrl(url),
     category,
+    priceThreshold: normalizeThreshold(extras.priceThreshold),
+    active: true,
+    parseHour: normalizeHour(extras.parseHour, 20),
+    parseMinute: normalizeMinute(extras.parseMinute, 0),
     createdAt: new Date().toISOString(),
     lastParsedAt: null,
     lastError: null,
@@ -430,16 +562,36 @@ function addSourceJson(url, category) {
   }
   data.sources.push(source)
   saveJson(data)
-  return source
+  return mapSource(source)
+}
+
+function updateSourceJson(id, extras = {}) {
+  const data = loadJson()
+  const current = data.sources.find((s) => s.id === id)
+  if (!current) return null
+  if (extras.url != null) {
+    const url = String(extras.url).trim()
+    if (!url) throw new Error('Укажите URL')
+    const dup = data.sources.find((s) => s.url === url && s.category === current.category && s.id !== id)
+    if (dup) throw new Error('Такой URL уже есть в этой категории')
+    current.url = url
+  }
+  if (extras.name != null) current.name = String(extras.name).trim() || sourceNameFromUrl(current.url)
+  if (extras.priceThreshold != null) current.priceThreshold = normalizeThreshold(extras.priceThreshold)
+  if (extras.parseHour != null) current.parseHour = normalizeHour(extras.parseHour, current.parseHour)
+  if (extras.parseMinute != null) current.parseMinute = normalizeMinute(extras.parseMinute, current.parseMinute)
+  if (extras.active != null) current.active = Boolean(extras.active)
+  saveJson(data)
+  return mapSource(current)
 }
 
 function deleteSourceJson(id) {
   const data = loadJson()
-  const listingIds = new Set(data.listings.filter((l) => l.sourceId === id).map((l) => l.id))
-  data.sources = data.sources.filter((s) => s.id !== id)
-  data.listings = data.listings.filter((l) => l.sourceId !== id)
-  data.snapshots = data.snapshots.filter((s) => !listingIds.has(s.listingId))
+  const current = data.sources.find((s) => s.id === id)
+  if (!current) return null
+  current.active = false
   saveJson(data)
+  return mapSource(current)
 }
 
 function prevPriceFromHistory(data, listingId) {
@@ -501,8 +653,9 @@ function applyParseJson(sourceId, items, error, runId) {
     const url = normalizeListingUrl(item.url)
     const externalId = item.externalId || listingIdFromUrl(url)
     let listing =
-      (externalId && data.listings.find((l) => l.externalId === externalId)) ||
-      data.listings.find((l) => normalizeListingUrl(l.url) === url)
+      (externalId &&
+        data.listings.find((l) => l.externalId === externalId && l.category === source.category)) ||
+      data.listings.find((l) => normalizeListingUrl(l.url) === url && l.category === source.category)
     if (!listing) {
       listing = {
         id: randomUUID(),
@@ -523,13 +676,14 @@ function applyParseJson(sourceId, items, error, runId) {
       changes.push(changeRow('added', listing, null, listing))
     } else {
       const prev = beforeById.get(listing.id) || { ...listing }
+      const skipPrice = belowPriceThreshold(prev.priceByn, item.priceByn, source.priceThreshold)
       const next = {
         title: item.title || listing.title,
         rooms: item.rooms ?? listing.rooms,
         areaM2: item.areaM2 ?? listing.areaM2,
-        priceByn: item.priceByn ?? listing.priceByn,
+        priceByn: skipPrice ? prev.priceByn : item.priceByn ?? listing.priceByn,
       }
-      listing.sourceId = sourceId
+      listing.sourceId = listing.sourceId || sourceId
       listing.externalId = externalId || listing.externalId
       listing.url = url
       listing.category = source.category
@@ -541,7 +695,23 @@ function applyParseJson(sourceId, items, error, runId) {
       listing.active = true
       listing.lastParsedAt = now
       if (!prev.active) changes.push(changeRow('added', listing, prev, next))
-      else if (listingChanged(prev, next)) changes.push(changeRow('updated', listing, prev, next))
+      else if (!skipPrice && listingChanged(prev, next)) changes.push(changeRow('updated', listing, prev, next))
+      if (prev.active && skipPrice) {
+        seen.add(listing.id)
+        upserted.push(listing)
+        const snap = data.snapshots.find((s) => s.listingId === listing.id && s.date === date)
+        const payload = {
+          listingId: listing.id,
+          date,
+          priceByn: listing.priceByn,
+          rooms: listing.rooms,
+          areaM2: listing.areaM2,
+          category: listing.category,
+        }
+        if (snap) Object.assign(snap, payload)
+        else data.snapshots.push(payload)
+        continue
+      }
     }
 
     seen.add(listing.id)
@@ -607,8 +777,12 @@ export async function getSource(id) {
   return hasDatabase() ? getSourceSql(id) : getSourceJson(id)
 }
 
-export async function addSource(url, category) {
-  return hasDatabase() ? addSourceSql(url, category) : addSourceJson(url, category)
+export async function addSource(url, category, extras = {}) {
+  return hasDatabase() ? addSourceSql(url, category, extras) : addSourceJson(url, category, extras)
+}
+
+export async function updateSource(id, extras = {}) {
+  return hasDatabase() ? updateSourceSql(id, extras) : updateSourceJson(id, extras)
 }
 
 export async function deleteSource(id) {
@@ -773,16 +947,21 @@ function finishParseRunJson(id, { error } = {}) {
   if (!run) return
   run.finishedAt = new Date().toISOString()
   if (error) run.error = error
+  if (isEmptyRun(run)) {
+    data.parseRuns = data.parseRuns.filter((row) => row.id !== id)
+    data.parseChanges = (data.parseChanges || []).filter((row) => row.runId !== id)
+  }
   saveJson(data)
 }
 
 async function finishParseRunSql(id, { error } = {}) {
   const sql = useSql()
-  if (error) {
-    await sql`update parse_runs set finished_at = now(), error = coalesce(error, ${error}) where id = ${id}`
-    return
+  const [row] = error
+    ? await sql`update parse_runs set finished_at = now(), error = coalesce(error, ${error}) where id = ${id} returning *`
+    : await sql`update parse_runs set finished_at = now() where id = ${id} returning *`
+  if (row && isEmptyRun(row)) {
+    await sql`delete from parse_runs where id = ${id}`
   }
-  await sql`update parse_runs set finished_at = now() where id = ${id}`
 }
 
 export async function finishParseRun(id, payload) {
@@ -793,16 +972,20 @@ function listParseRunsJson() {
   const data = loadJson()
   const runs = [...(data.parseRuns || [])].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
   const changes = data.parseChanges || []
-  return runs.slice(0, 30).map((run) =>
-    mapParseRun(
-      run,
-      changes.filter((c) => c.runId === run.id).map(mapParseChange),
-    ),
-  )
+  return runs
+    .filter((run) => !isEmptyRun(run))
+    .slice(0, 30)
+    .map((run) => mapParseRun(run, changes.filter((c) => c.runId === run.id).map(mapParseChange)))
 }
 
 async function listParseRunsSql() {
   const sql = useSql()
+  await sql`
+    delete from parse_runs
+    where parsed_count = 0 and added_count = 0 and updated_count = 0 and removed_count = 0
+      and error is null
+      and (finished_at is not null or started_at < now() - interval '2 minutes')
+  `
   const runs = await sql`select * from parse_runs order by started_at desc limit 30`
   if (!runs.length) return []
   const ids = runs.map((row) => row.id)

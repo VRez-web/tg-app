@@ -19,6 +19,7 @@ import {
   listParseRuns,
   listSources,
   startParseRun,
+  updateSource,
 } from './store.js'
 import { parseSource } from './parser.js'
 import { getRates, getUsdRate } from './rates.js'
@@ -57,8 +58,25 @@ async function parseOne(source, runId) {
   }
 }
 
-async function parseAll(category, runId) {
-  const sources = await listSources(category)
+function recentlyParsed(source) {
+  if (!source.lastParsedAt) return false
+  return Date.now() - Date.parse(source.lastParsedAt) < 90_000
+}
+
+function minskClock(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Minsk',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  return {
+    hour: Number(parts.find((part) => part.type === 'hour')?.value),
+    minute: Number(parts.find((part) => part.type === 'minute')?.value),
+  }
+}
+
+async function parseMany(sources, runId) {
   const results = []
   for (const source of sources) {
     results.push(await parseOne(source, runId))
@@ -92,8 +110,12 @@ async function withParseRun(trigger, category, work) {
   }
 }
 
-async function runParse({ trigger, category }) {
-  const results = await withParseRun(trigger, category, (runId) => parseAll(category, runId))
+async function runParse({ trigger, category, sources } = {}) {
+  const list = sources
+    ? sources.filter((source) => source.active)
+    : (await listSources(category)).filter((source) => source.active)
+  if (!list.length) return { results: [] }
+  const results = await withParseRun(trigger, category, (runId) => parseMany(list, runId))
   return { results }
 }
 
@@ -134,7 +156,12 @@ app.post('/api/sources', async (req, res) => {
   try {
     const url = normalizeUrl(req.body?.url)
     const category = normalizeCategory(req.body?.category)
-    const source = await addSource(url, category)
+    const source = await addSource(url, category, {
+      name: req.body?.name,
+      priceThreshold: req.body?.priceThreshold,
+      parseHour: req.body?.parseHour,
+      parseMinute: req.body?.parseMinute,
+    })
     const parsed = await withParseRun('manual', category, (runId) => parseOne(source, runId))
     const listings = (await listListings(category)).filter((l) => l.sourceId === source.id)
     res.status(201).json({
@@ -147,9 +174,28 @@ app.post('/api/sources', async (req, res) => {
   }
 })
 
+app.patch('/api/sources/:id', async (req, res) => {
+  try {
+    const extras = {
+      name: req.body?.name,
+      priceThreshold: req.body?.priceThreshold,
+      parseHour: req.body?.parseHour,
+      parseMinute: req.body?.parseMinute,
+      active: req.body?.active,
+    }
+    if (req.body?.url != null) extras.url = normalizeUrl(req.body.url)
+    const source = await updateSource(req.params.id, extras)
+    if (!source) return res.status(404).json({ error: 'Парсер не найден' })
+    res.json(source)
+  } catch (error) {
+    res.status(400).json({ error: error.message })
+  }
+})
+
 app.delete('/api/sources/:id', async (req, res) => {
-  await deleteSource(req.params.id)
-  res.status(204).end()
+  const source = await deleteSource(req.params.id)
+  if (!source) return res.status(404).json({ error: 'Парсер не найден' })
+  res.json(source)
 })
 
 app.get('/api/listings', async (req, res) => {
@@ -214,12 +260,26 @@ if (fs.existsSync(clientDist)) {
 }
 
 cron.schedule(
-  '0 20 * * *',
+  '* * * * *',
   () => {
-    console.log('[cron] daily parse started')
-    runParse({ trigger: 'cron' })
-      .then(({ results }) => console.log('[cron] daily parse done', results))
-      .catch((error) => console.error('[cron] daily parse failed', error))
+    const { hour, minute } = minskClock()
+    listSources()
+      .then((sources) => {
+        const due = sources.filter(
+          (source) =>
+            source.active &&
+            source.parseHour === hour &&
+            source.parseMinute === minute &&
+            !recentlyParsed(source),
+        )
+        if (!due.length) return null
+        console.log('[cron] parse started', due.map((source) => source.name).join(', '))
+        return runParse({ trigger: 'cron', sources: due })
+      })
+      .then((result) => {
+        if (result) console.log('[cron] parse done', result.results)
+      })
+      .catch((error) => console.error('[cron] parse failed', error))
   },
   { timezone: 'Europe/Minsk' },
 )

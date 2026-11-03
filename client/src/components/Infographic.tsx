@@ -12,6 +12,7 @@ import {
 } from 'recharts'
 import { api } from '../api'
 import type { Stats, StatsPeriod, SubTab } from '../types'
+import { Modal } from './Modal'
 
 const PERIODS: { id: StatsPeriod; label: string }[] = [
   { id: 'days', label: 'Дни' },
@@ -62,19 +63,6 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.body.style.overflow = prev
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [onClose])
-
-  useEffect(() => {
     const controller = new AbortController()
     setLoading(true)
     setError('')
@@ -102,10 +90,13 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
     date: row.date.length > 7 ? row.date.slice(5) : row.date,
     byn: row.avgByn || 0,
   }))
+  const historyPerM2Data = (stats?.historyPerM2 || []).map((row) => ({
+    date: row.date.length > 7 ? row.date.slice(5) : row.date,
+    byn: row.avgByn || 0,
+  }))
 
   return (
-    <div className="modal-overlay" onClick={onClose} role="presentation">
-      <section className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <Modal onClose={onClose}>
         <header className="modal-head">
           <div>
             <h3>Инфографика</h3>
@@ -196,6 +187,29 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
               </div>
             )}
 
+            {category === 'apartments' && historyPerM2Data.length > 0 && (
+              <div className="stat-block">
+                <h4>{stats.historyPerM2Title}</h4>
+                <div className="chart-box">
+                  <ResponsiveContainer width="100%" height={220}>
+                    <AreaChart data={historyPerM2Data}>
+                      <defs>
+                        <linearGradient id="m2Fill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#5b8cff" stopOpacity={0.35} />
+                          <stop offset="100%" stopColor="#5b8cff" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                      <XAxis dataKey="date" stroke="#8b9bb0" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="#8b9bb0" fontSize={11} tickLine={false} axisLine={false} />
+                      <Tooltip formatter={(value) => money(typeof value === 'number' ? value : Number(value))} />
+                      <Area type="monotone" dataKey="byn" name="Br/м²" stroke="#5b8cff" fill="url(#m2Fill)" strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             {category === 'apartments' && (
               <div className="modal-lists">
                 <List title="3 самых дешёвых" items={stats.cheapest} />
@@ -204,7 +218,6 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
             )}
           </>
         )}
-      </section>
-    </div>
+    </Modal>
   )
 }

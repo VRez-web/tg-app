@@ -1,4 +1,4 @@
-export type Tab = 'news' | 'prices'
+export type Tab = 'news' | 'prices' | 'settings'
 export type SubTab = 'apartments' | 'other'
 export type PricesView = SubTab | 'history'
 export type StatsPeriod = 'days' | 'weeks' | 'months' | 'years'
@@ -16,7 +16,12 @@ export interface NewsItem {
 export interface Source {
   id: string
   url: string
+  name: string
   category: SubTab
+  priceThreshold: number
+  active: boolean
+  parseHour: number
+  parseMinute: number
   createdAt: string
   lastParsedAt: string | null
   lastError: string | null
@@ -97,6 +102,7 @@ export interface Stats {
   from: string
   to: string
   historyTitle: string
+  historyPerM2Title: string
   usdRate: number | null
   count: number
   pricedCount: number
@@ -108,4 +114,5 @@ export interface Stats {
   cheapest: StatsItem[]
   expensive: StatsItem[]
   history: { date: string; avgByn: number | null; avgUsd: number | null; count: number }[]
+  historyPerM2: { date: string; avgByn: number | null; avgUsd: number | null; count: number }[]
 }

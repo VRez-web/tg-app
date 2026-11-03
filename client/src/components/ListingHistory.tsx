@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { api } from '../api'
 import type { Listing, ListingDetail, StatsPeriod } from '../types'
+import { Modal } from './Modal'
 
 const PERIODS: { id: StatsPeriod; label: string }[] = [
   { id: 'days', label: 'Дни' },
@@ -34,19 +35,6 @@ export function ListingHistory({ listing, onClose }: { listing: Listing; onClose
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.body.style.overflow = prev
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [onClose])
-
-  useEffect(() => {
     const controller = new AbortController()
     setLoading(true)
     setError('')
@@ -76,8 +64,7 @@ export function ListingHistory({ listing, onClose }: { listing: Listing; onClose
   const points = [...(detail?.points || [])].reverse()
 
   return (
-    <div className="modal-overlay" onClick={onClose} role="presentation">
-      <section className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <Modal onClose={onClose}>
         <header className="modal-head">
           <div>
             <h3>{current.title}</h3>
@@ -150,7 +137,6 @@ export function ListingHistory({ listing, onClose }: { listing: Listing; onClose
         <a className="btn" href={current.url} target="_blank" rel="noreferrer">
           Открыть объявление
         </a>
-      </section>
-    </div>
+    </Modal>
   )
 }

@@ -63,11 +63,12 @@ function bucket(date, period) {
   return date
 }
 
-function historyTitle(period) {
-  if (period === 'weeks') return 'Средняя цена по неделям'
-  if (period === 'months') return 'Средняя цена по месяцам'
-  if (period === 'years') return 'Средняя цена по годам'
-  return 'Средняя цена по дням'
+function historyTitle(period, perM2 = false) {
+  const unit = perM2 ? 'за м² ' : ''
+  if (period === 'weeks') return `Средняя цена ${unit}по неделям`
+  if (period === 'months') return `Средняя цена ${unit}по месяцам`
+  if (period === 'years') return `Средняя цена ${unit}по годам`
+  return `Средняя цена ${unit}по дням`
 }
 
 export function normalizePeriod(raw) {
@@ -135,6 +136,22 @@ export async function buildStats(category, usdRate, period = 'days') {
       count: prices.length,
     }))
 
+  const byBucketM2 = new Map()
+  for (const snap of snapshots) {
+    if (snap.priceByn == null || !snap.areaM2) continue
+    const key = bucket(snap.date, period)
+    if (!byBucketM2.has(key)) byBucketM2.set(key, [])
+    byBucketM2.get(key).push(snap.priceByn / snap.areaM2)
+  }
+  const historyPerM2 = [...byBucketM2.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, prices]) => ({
+      date,
+      avgByn: avg(prices),
+      avgUsd: bynToUsd(avg(prices), usdRate),
+      count: prices.length,
+    }))
+
   const sorted = [...priced].sort((a, b) => a.priceByn - b.priceByn)
   const pick = (item) => ({
     id: item.id,
@@ -152,6 +169,7 @@ export async function buildStats(category, usdRate, period = 'days') {
     from: range.from,
     to: range.to,
     historyTitle: historyTitle(period),
+    historyPerM2Title: historyTitle(period, true),
     usdRate,
     count: items.length,
     pricedCount: priced.length,
@@ -163,6 +181,7 @@ export async function buildStats(category, usdRate, period = 'days') {
     cheapest: sorted.slice(0, 3).map(pick),
     expensive: sorted.slice(-3).reverse().map(pick),
     history,
+    historyPerM2,
   }
 }
 

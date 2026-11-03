@@ -102,11 +102,22 @@ function fromKufarAd(ad) {
   const rooms = pickParam(params, 'rooms', 'комнат', 'количество комнат')
   const areaM2 = pickParam(params, 'size', 'area', 'площадь', 'общая площадь, м²')
   const address = params.find((x) => x.p === 'address')?.v
-  const title = String(address || '').trim() || 'Адрес не указан'
+  const subject = String(ad.subject || ad.header || '').trim()
+  const title = String(address || '').trim() || subject || 'Адрес не указан'
   const priceByn = kufarPriceByn(ad.price_byn)
   const image = kufarImage(ad.images?.[0])
 
-  return { url, externalId: id ? String(id) : listingIdFromUrl(url), title, rooms, areaM2, priceByn, image }
+  return {
+    url,
+    externalId: id ? String(id) : listingIdFromUrl(url),
+    title,
+    rooms,
+    areaM2,
+    priceByn,
+    image,
+    subject,
+    body: String(ad.body_short || ad.body || '').trim(),
+  }
 }
 
 export function listingIdFromUrl(url) {
@@ -335,6 +346,11 @@ async function parseGeneric(url) {
   return [...found.values()]
 }
 
+export function isShareListing(item) {
+  const text = [item.subject, item.body].filter(Boolean).join(' ').toLowerCase()
+  return /(^|[^\p{L}\p{N}])(доля|доли|долей|долевая|долевую|долевой)([^\p{L}\p{N}]|$)/u.test(text)
+}
+
 export async function parseSource(url, usdRate, category) {
   const host = new URL(url).hostname
   let items
@@ -342,7 +358,7 @@ export async function parseSource(url, usdRate, category) {
   else if (host.includes('onliner.by')) items = await parseOnliner(url)
   else items = await parseGeneric(url)
 
-  return items.map((item) => {
+  return items.filter((item) => !isShareListing(item)).map((item) => {
     let priceByn = item.priceByn
     if (priceByn == null && item.priceUsd != null && usdRate) {
       priceByn = Math.round(item.priceUsd * usdRate * 100) / 100

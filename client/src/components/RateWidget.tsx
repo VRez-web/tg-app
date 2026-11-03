@@ -14,7 +14,7 @@ export function RateWidget() {
   const items = [
     { code: 'USD', value: rates?.usd },
     { code: 'EUR', value: rates?.eur },
-    { code: 'RUB', value: rates?.rub },
+    { code: '100 RUB', value: rates?.rub != null ? rates.rub * 100 : null },
   ]
 
   return (

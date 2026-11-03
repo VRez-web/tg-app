@@ -10,8 +10,19 @@ create table if not exists sources (
   last_parsed_at timestamptz,
   last_error text,
   last_count int not null default 0,
+  name text,
+  price_threshold int not null default 200,
+  active boolean not null default true,
+  parse_hour int not null default 20,
+  parse_minute int not null default 0,
   unique (url, category)
 );
+
+alter table sources add column if not exists name text;
+alter table sources add column if not exists price_threshold int not null default 200;
+alter table sources add column if not exists active boolean not null default true;
+alter table sources add column if not exists parse_hour int not null default 20;
+alter table sources add column if not exists parse_minute int not null default 0;
 
 create table if not exists listings (
   id uuid primary key default gen_random_uuid(),
@@ -31,8 +42,9 @@ create table if not exists listings (
 
 alter table listings add column if not exists first_seen_at timestamptz;
 
-create unique index if not exists listings_external_id_uidx
-  on listings (external_id) where external_id is not null;
+drop index if exists listings_external_id_uidx;
+create unique index if not exists listings_external_id_category_uidx
+  on listings (external_id, category) where external_id is not null;
 create index if not exists listings_source_id_idx on listings (source_id);
 create index if not exists listings_category_active_idx on listings (category, active);
 
