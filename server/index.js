@@ -10,6 +10,7 @@ import {
   addSource,
   applyParse,
   backfillParseRuns,
+  backfillSnapshotPrices,
   deleteListing,
   deleteSource,
   finishParseRun,
@@ -297,6 +298,11 @@ app.listen(PORT, async () => {
     await backfillParseRuns().catch((error) => console.error('[parse-history] backfill failed', error))
     const imported = await importJsonFile()
     if (imported.imported) console.log('[import]', imported)
+    const priced = await backfillSnapshotPrices().catch((error) => {
+      console.error('[fx] snapshot backfill failed', error)
+      return null
+    })
+    if (priced?.updated) console.log('[fx] stored historical usd prices', priced.updated)
   } catch (error) {
     console.error('[db] init failed', error)
   }

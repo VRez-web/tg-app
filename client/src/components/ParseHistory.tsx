@@ -52,7 +52,7 @@ function changePriceClass(change: ParseChange) {
   return ''
 }
 
-export function ParseHistory() {
+export function ParseHistory({ onOpenListing }: { onOpenListing: (change: ParseChange) => void }) {
   const [runs, setRuns] = useState<ParseRun[]>([])
   const [openId, setOpenId] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -123,13 +123,26 @@ export function ParseHistory() {
                       {ACTION_LABEL[action]} · {items.length}
                     </h4>
                     {items.slice(0, 40).map((change) => (
-                      <div key={change.id} className={`history-item ${action} ${changePriceClass(change)}`}>
+                      <div
+                        key={change.id}
+                        className={`history-item ${action} ${changePriceClass(change)}${change.listingId ? ' history-item-open' : ''}`}
+                        role={change.listingId ? 'button' : undefined}
+                        tabIndex={change.listingId ? 0 : undefined}
+                        onClick={() => change.listingId && onOpenListing(change)}
+                        onKeyDown={(event) => {
+                          if (!change.listingId) return
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            onOpenListing(change)
+                          }
+                        }}
+                      >
                         <div>
                           <b>{change.title || 'Без адреса'}</b>
                           <p>{changeText(change)}</p>
                         </div>
                         {change.url && (
-                          <a href={change.url} target="_blank" rel="noreferrer">
+                          <a href={change.url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
                             Открыть
                           </a>
                         )}

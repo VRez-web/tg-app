@@ -26,14 +26,27 @@ function money(value: number | null | undefined, suffix = 'Br') {
   return `${value.toLocaleString('ru-BY', { maximumFractionDigits: 0 })} ${suffix}`
 }
 
+type Currency = 'byn' | 'usd'
+
+const axis = { stroke: '#8b9bb0', fontSize: 11, tickLine: false, axisLine: false } as const
+
 function rooms(value: number | null) {
   if (value == null) return ''
   if (value <= 0) return 'студия'
   return `${value}-комн.`
 }
 
-function List({ title, items }: { title: string; items: Stats['cheapest'] }) {
+function List({
+  title,
+  items,
+  currency,
+}: {
+  title: string
+  items: Stats['cheapest']
+  currency: Currency
+}) {
   if (!items.length) return null
+  const suffix = currency === 'usd' ? '$' : 'Br'
   return (
     <div className="stat-block">
       <h4>{title}</h4>
@@ -46,9 +59,7 @@ function List({ title, items }: { title: string; items: Stats['cheapest'] }) {
             <span>
               {[rooms(item.rooms), item.areaM2 ? `${item.areaM2} м²` : null].filter(Boolean).join(' · ')}
             </span>
-            <b>
-              {money(item.priceByn)} / {money(item.priceUsd, '$')}
-            </b>
+            <b>{money(currency === 'usd' ? item.priceUsd : item.priceByn, suffix)}</b>
           </li>
         ))}
       </ol>
@@ -58,6 +69,7 @@ function List({ title, items }: { title: string; items: Stats['cheapest'] }) {
 
 export function Infographic({ category, onClose }: { category: SubTab; onClose: () => void }) {
   const [period, setPeriod] = useState<StatsPeriod>('days')
+  const [currency, setCurrency] = useState<Currency>('byn')
   const [stats, setStats] = useState<Stats | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -82,18 +94,30 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
     return () => controller.abort()
   }, [category, period])
 
+  const usdReady = Boolean(
+    stats &&
+      (stats.avgPriceUsd != null ||
+        stats.avgPricePerM2Usd != null ||
+        stats.byRooms.some((row) => row.avgUsd != null) ||
+        stats.history.some((row) => row.avgUsd != null) ||
+        stats.historyPerM2.some((row) => row.avgUsd != null)),
+  )
+  const suffix = currency === 'usd' ? '$' : 'Br'
+  const pick = (byn: number | null | undefined, usd: number | null | undefined) =>
+    currency === 'usd' ? usd ?? null : byn || 0
   const roomData = (stats?.byRooms || []).map((row) => ({
     name: row.label,
-    byn: row.avgByn || 0,
+    value: pick(row.avgByn, row.avgUsd),
   }))
   const historyData = (stats?.history || []).map((row) => ({
     date: row.date.length > 7 ? row.date.slice(5) : row.date,
-    byn: row.avgByn || 0,
+    value: pick(row.avgByn, row.avgUsd),
   }))
   const historyPerM2Data = (stats?.historyPerM2 || []).map((row) => ({
     date: row.date.length > 7 ? row.date.slice(5) : row.date,
-    byn: row.avgByn || 0,
+    value: pick(row.avgByn, row.avgUsd),
   }))
+  const tip = (value: unknown) => money(typeof value === 'number' ? value : Number(value), suffix)
 
   return (
     <Modal onClose={onClose}>
@@ -110,6 +134,24 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
             Закрыть
           </button>
         </header>
+
+        <div className="period-tabs currency-tabs">
+          <button
+            type="button"
+            className={`subtab ${currency === 'byn' ? 'active' : ''}`}
+            onClick={() => setCurrency('byn')}
+          >
+            Br
+          </button>
+          <button
+            type="button"
+            className={`subtab ${currency === 'usd' ? 'active' : ''}`}
+            disabled={!usdReady}
+            onClick={() => setCurrency('usd')}
+          >
+            $
+          </button>
+        </div>
 
         <div className="period-tabs">
           {PERIODS.map((item) => (
@@ -132,14 +174,12 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
             <div className="stat-grid">
               <article>
                 <small>Средняя стоимость</small>
-                <strong>{money(stats.avgPriceByn)}</strong>
-                <em>{money(stats.avgPriceUsd, '$')}</em>
+                <strong>{money(currency === 'usd' ? stats.avgPriceUsd : stats.avgPriceByn, suffix)}</strong>
               </article>
               {category === 'apartments' && (
                 <article>
                   <small>Средняя за м²</small>
-                  <strong>{money(stats.avgPricePerM2Byn)}</strong>
-                  <em>{money(stats.avgPricePerM2Usd, '$')}</em>
+                  <strong>{money(currency === 'usd' ? stats.avgPricePerM2Usd : stats.avgPricePerM2Byn, suffix)}</strong>
                 </article>
               )}
             </div>
@@ -152,12 +192,9 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
                     <BarChart data={roomData}>
                       <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
                       <XAxis dataKey="name" stroke="#8b9bb0" fontSize={12} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#8b9bb0" fontSize={11} tickLine={false} axisLine={false} />
-                      <Tooltip
-                        cursor={{ fill: 'rgba(91,140,255,0.08)' }}
-                        formatter={(value) => money(typeof value === 'number' ? value : Number(value))}
-                      />
-                      <Bar dataKey="byn" name="Br" fill="#5b8cff" radius={[8, 8, 0, 0]} />
+                      <YAxis {...axis} />
+                      <Tooltip cursor={{ fill: 'rgba(91,140,255,0.08)' }} formatter={tip} />
+                      <Bar dataKey="value" name={suffix} fill={currency === 'usd' ? '#f5c16c' : '#5b8cff'} radius={[8, 8, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -172,15 +209,22 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
                     <AreaChart data={historyData}>
                       <defs>
                         <linearGradient id="priceFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#6ee7c5" stopOpacity={0.35} />
-                          <stop offset="100%" stopColor="#6ee7c5" stopOpacity={0} />
+                          <stop offset="0%" stopColor={currency === 'usd' ? '#f5c16c' : '#6ee7c5'} stopOpacity={0.35} />
+                          <stop offset="100%" stopColor={currency === 'usd' ? '#f5c16c' : '#6ee7c5'} stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
                       <XAxis dataKey="date" stroke="#8b9bb0" fontSize={12} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#8b9bb0" fontSize={11} tickLine={false} axisLine={false} />
-                      <Tooltip formatter={(value) => money(typeof value === 'number' ? value : Number(value))} />
-                      <Area type="monotone" dataKey="byn" name="Br" stroke="#6ee7c5" fill="url(#priceFill)" strokeWidth={2} />
+                      <YAxis {...axis} />
+                      <Tooltip formatter={tip} />
+                      <Area
+                        type="monotone"
+                        dataKey="value"
+                        name={suffix}
+                        stroke={currency === 'usd' ? '#f5c16c' : '#6ee7c5'}
+                        fill="url(#priceFill)"
+                        strokeWidth={2}
+                      />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -195,15 +239,22 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
                     <AreaChart data={historyPerM2Data}>
                       <defs>
                         <linearGradient id="m2Fill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#5b8cff" stopOpacity={0.35} />
-                          <stop offset="100%" stopColor="#5b8cff" stopOpacity={0} />
+                          <stop offset="0%" stopColor={currency === 'usd' ? '#f5c16c' : '#5b8cff'} stopOpacity={0.35} />
+                          <stop offset="100%" stopColor={currency === 'usd' ? '#f5c16c' : '#5b8cff'} stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
                       <XAxis dataKey="date" stroke="#8b9bb0" fontSize={12} tickLine={false} axisLine={false} />
-                      <YAxis stroke="#8b9bb0" fontSize={11} tickLine={false} axisLine={false} />
-                      <Tooltip formatter={(value) => money(typeof value === 'number' ? value : Number(value))} />
-                      <Area type="monotone" dataKey="byn" name="Br/м²" stroke="#5b8cff" fill="url(#m2Fill)" strokeWidth={2} />
+                      <YAxis {...axis} />
+                      <Tooltip formatter={tip} />
+                      <Area
+                        type="monotone"
+                        dataKey="value"
+                        name={currency === 'usd' ? '$/м²' : 'Br/м²'}
+                        stroke={currency === 'usd' ? '#f5c16c' : '#5b8cff'}
+                        fill="url(#m2Fill)"
+                        strokeWidth={2}
+                      />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -212,8 +263,8 @@ export function Infographic({ category, onClose }: { category: SubTab; onClose: 
 
             {category === 'apartments' && (
               <div className="modal-lists">
-                <List title="3 самых дешёвых" items={stats.cheapest} />
-                <List title="3 самых дорогих" items={stats.expensive} />
+                <List title="3 самых дешёвых" items={stats.cheapest} currency={currency} />
+                <List title="3 самых дорогих" items={stats.expensive} currency={currency} />
               </div>
             )}
           </>

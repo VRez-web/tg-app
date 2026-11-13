@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import { fileURLToPath } from 'url'
 import { listingIdFromUrl, normalizeListingUrl } from './parser.js'
 import { hasDatabase, useSql } from './db.js'
+import { bynToUsd, expandUsdRates, fetchNbrbUsdRates, shiftDate } from './rates.js'
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data')
 const file = path.join(dir, 'store.json')
@@ -225,6 +226,7 @@ function mapListing(row) {
     active: Boolean(row.active),
     firstSeenAt: iso(row.first_seen_at || row.firstSeenAt) || iso(row.last_parsed_at || row.lastParsedAt),
     lastParsedAt: iso(row.last_parsed_at || row.lastParsedAt),
+    prevPriceByn: num(row.prev_price_byn ?? row.prevPriceByn),
     priceChange: row.priceChange || priceChange(row.price_byn ?? row.priceByn, row.prev_price_byn ?? row.prevPriceByn),
   }
 }
@@ -234,6 +236,7 @@ function mapSnapshot(row) {
     listingId: row.listing_id,
     date: ymd(row.date),
     priceByn: num(row.price_byn),
+    priceUsd: num(row.price_usd ?? row.priceUsd),
     rooms: row.rooms == null ? null : Number(row.rooms),
     areaM2: num(row.area_m2),
     category: row.category,
@@ -353,12 +356,13 @@ async function deleteListingSql(id) {
 
 async function applyParseSql(sourceId, items, error, runId) {
   const sql = useSql()
+  const date = today()
+  const usdRate = error ? null : await usdRateOn(date)
   const result = await sql.begin(async (tx) => {
     const [source] = await tx`select * from sources where id = ${sourceId}`
     if (!source) return { listings: [], changes: [], parsedCount: 0, error: error || null }
 
     const now = new Date()
-    const date = today()
     await tx`
       update sources
       set last_parsed_at = ${now}, last_error = ${error || null}, last_count = ${items.length}
@@ -454,10 +458,11 @@ async function applyParseSql(sourceId, items, error, runId) {
           })
         }
         await tx`
-          insert into snapshots (listing_id, date, price_byn, rooms, area_m2, category)
-          values (${listing.id}, ${date}, ${listing.price_byn}, ${listing.rooms}, ${listing.area_m2}, ${listing.category})
+          insert into snapshots (listing_id, date, price_byn, price_usd, rooms, area_m2, category)
+          values (${listing.id}, ${date}, ${listing.price_byn}, ${bynToUsd(listing.price_byn, usdRate)}, ${listing.rooms}, ${listing.area_m2}, ${listing.category})
           on conflict (listing_id, date) do update set
             price_byn = excluded.price_byn,
+            price_usd = coalesce(excluded.price_usd, snapshots.price_usd),
             rooms = excluded.rooms,
             area_m2 = excluded.area_m2,
             category = excluded.category
@@ -466,10 +471,11 @@ async function applyParseSql(sourceId, items, error, runId) {
       }
 
       await tx`
-        insert into snapshots (listing_id, date, price_byn, rooms, area_m2, category)
-        values (${listing.id}, ${date}, ${listing.price_byn}, ${listing.rooms}, ${listing.area_m2}, ${listing.category})
+        insert into snapshots (listing_id, date, price_byn, price_usd, rooms, area_m2, category)
+        values (${listing.id}, ${date}, ${listing.price_byn}, ${bynToUsd(listing.price_byn, usdRate)}, ${listing.rooms}, ${listing.area_m2}, ${listing.category})
         on conflict (listing_id, date) do update set
           price_byn = excluded.price_byn,
+          price_usd = coalesce(excluded.price_usd, snapshots.price_usd),
           rooms = excluded.rooms,
           area_m2 = excluded.area_m2,
           category = excluded.category
@@ -620,7 +626,9 @@ function deleteListingJson(id) {
   saveJson(data)
 }
 
-function applyParseJson(sourceId, items, error, runId) {
+async function applyParseJson(sourceId, items, error, runId) {
+  const date = today()
+  const usdRate = error ? null : await usdRateOn(date)
   const data = loadJson()
   if (!data.parseRuns) data.parseRuns = []
   if (!data.parseChanges) data.parseChanges = []
@@ -628,7 +636,6 @@ function applyParseJson(sourceId, items, error, runId) {
   if (!source) return []
 
   const now = new Date().toISOString()
-  const date = today()
   source.lastParsedAt = now
   source.lastError = error || null
   source.lastCount = items.length
@@ -704,6 +711,7 @@ function applyParseJson(sourceId, items, error, runId) {
           listingId: listing.id,
           date,
           priceByn: listing.priceByn,
+          priceUsd: bynToUsd(listing.priceByn, usdRate) ?? snap?.priceUsd ?? null,
           rooms: listing.rooms,
           areaM2: listing.areaM2,
           category: listing.category,
@@ -720,6 +728,7 @@ function applyParseJson(sourceId, items, error, runId) {
       listingId: listing.id,
       date,
       priceByn: listing.priceByn,
+      priceUsd: bynToUsd(listing.priceByn, usdRate) ?? snap?.priceUsd ?? null,
       rooms: listing.rooms,
       areaM2: listing.areaM2,
       category: listing.category,
@@ -1024,6 +1033,117 @@ export async function backfillParseRuns() {
   `
 }
 
+async function readFxRates(from, to) {
+  if (!hasDatabase()) {
+    const rows = loadJson().fxRates || []
+    return new Map(
+      rows
+        .filter((row) => row.date >= from && row.date <= to)
+        .map((row) => [row.date, Number(row.usdByn)]),
+    )
+  }
+  const rows = await useSql()`
+    select date::text as date, usd_byn
+    from fx_rates
+    where date >= ${from} and date <= ${to}
+  `
+  return new Map(rows.map((row) => [ymd(row.date), Number(row.usd_byn)]))
+}
+
+async function writeFxRates(rows) {
+  if (!rows.length) return
+  if (!hasDatabase()) {
+    const data = loadJson()
+    const map = new Map((data.fxRates || []).map((row) => [row.date, row.usdByn]))
+    for (const row of rows) map.set(row.date, row.usdByn)
+    data.fxRates = [...map.entries()]
+      .map(([date, usdByn]) => ({ date, usdByn }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+    saveJson(data)
+    return
+  }
+  const sql = useSql()
+  for (const row of rows) {
+    await sql`
+      insert into fx_rates (date, usd_byn)
+      values (${row.date}, ${row.usdByn})
+      on conflict (date) do update set usd_byn = excluded.usd_byn
+    `
+  }
+}
+
+async function ensureUsdRates(from, to) {
+  const start = shiftDate(from, -14)
+  const existing = await readFxRates(start, to)
+  const covered = []
+  for (let day = from; day <= to; day = shiftDate(day, 1)) covered.push(day)
+  if (covered.length && covered.every((day) => existing.has(day))) return existing
+  const known = [...existing.entries()].map(([date, usdByn]) => ({ date, usdByn }))
+  let fetched = []
+  try {
+    fetched = await fetchNbrbUsdRates(start, to)
+  } catch (error) {
+    console.error('[fx] nbrb history failed', error.message)
+  }
+  const expanded = expandUsdRates([...known, ...fetched], from, to)
+  const missing = expanded.filter((row) => existing.get(row.date) !== row.usdByn)
+  if (missing.length) await writeFxRates(missing)
+  const map = new Map(existing)
+  for (const row of expanded) map.set(row.date, row.usdByn)
+  return map
+}
+
+async function usdRateOn(date) {
+  try {
+    const map = await ensureUsdRates(date, date)
+    return map.get(date) ?? null
+  } catch (error) {
+    console.error('[fx] rate lookup failed', error)
+    return null
+  }
+}
+
+export async function backfillSnapshotPrices() {
+  if (!hasDatabase()) return backfillSnapshotPricesJson()
+  const sql = useSql()
+  const [bounds] = await sql`
+    select min(date)::text as min, max(date)::text as max
+    from snapshots
+    where price_usd is null and price_byn is not null
+  `
+  if (!bounds?.min) return { updated: 0 }
+  await ensureUsdRates(bounds.min, bounds.max)
+  const updated = await sql`
+    update snapshots s
+    set price_usd = round(s.price_byn / f.usd_byn, 2)
+    from fx_rates f
+    where s.price_usd is null
+      and s.price_byn is not null
+      and f.date = s.date
+      and f.usd_byn > 0
+  `
+  return { updated: updated.count }
+}
+
+async function backfillSnapshotPricesJson() {
+  const data = loadJson()
+  const pending = (data.snapshots || []).filter((snap) => snap.priceUsd == null && snap.priceByn != null)
+  if (!pending.length) return { updated: 0 }
+  const dates = pending.map((snap) => snap.date).sort()
+  const map = await ensureUsdRates(dates[0], dates[dates.length - 1])
+  const fresh = loadJson()
+  let updated = 0
+  for (const snap of fresh.snapshots || []) {
+    if (snap.priceUsd != null || snap.priceByn == null) continue
+    const usd = bynToUsd(snap.priceByn, map.get(snap.date))
+    if (usd == null) continue
+    snap.priceUsd = usd
+    updated += 1
+  }
+  if (updated) saveJson(fresh)
+  return { updated }
+}
+
 export async function listSnapshots(category) {
   return hasDatabase() ? listSnapshotsSql(category) : listSnapshotsJson(category)
 }
@@ -1083,10 +1203,11 @@ export async function importJsonFile({ force = false } = {}) {
 
     for (const snap of data.snapshots) {
       await tx`
-        insert into snapshots (listing_id, date, price_byn, rooms, area_m2, category)
-        values (${snap.listingId}, ${snap.date}, ${snap.priceByn}, ${snap.rooms}, ${snap.areaM2}, ${snap.category})
+        insert into snapshots (listing_id, date, price_byn, price_usd, rooms, area_m2, category)
+        values (${snap.listingId}, ${snap.date}, ${snap.priceByn}, ${snap.priceUsd ?? null}, ${snap.rooms}, ${snap.areaM2}, ${snap.category})
         on conflict (listing_id, date) do update set
           price_byn = excluded.price_byn,
+          price_usd = coalesce(excluded.price_usd, snapshots.price_usd),
           rooms = excluded.rooms,
           area_m2 = excluded.area_m2,
           category = excluded.category
