@@ -130,6 +130,10 @@ body {
   grid-template-columns: repeat(4, 1fr);
 }
 
+.period-tabs.currency-tabs {
+  grid-template-columns: 1fr 1fr;
+}
+
 .subtab {
   border: 0;
   border-radius: 10px;
@@ -144,6 +148,11 @@ body {
 .subtab.active {
   color: #081018;
   background: var(--mint);
+}
+
+.subtab:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .add-form,
@@ -323,20 +332,34 @@ body {
 }
 
 .listing-card .price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
   font-size: 15px;
   font-weight: 800;
   color: var(--text);
+  text-align: right;
   white-space: nowrap;
 }
 
-.listing-card .price-up,
+.listing-card .price-delta {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.listing-card .price-delta.price-up,
 .history-item.price-up p {
   color: var(--danger);
 }
 
-.listing-card .price-down,
+.listing-card .price-delta.price-down,
 .history-item.price-down p {
   color: var(--mint);
+}
+
+.history-item-open {
+  cursor: pointer;
 }
 
 .stat-grid,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
-import type { Listing, PricesView, Source, SubTab } from '../types'
+import type { Listing, ParseChange, PricesView, Source, SubTab } from '../types'
 import { AddParserModal } from './AddParserModal'
 import { Infographic } from './Infographic'
 import { ListingHistory } from './ListingHistory'
@@ -9,6 +9,35 @@ import { ParseHistory } from './ParseHistory'
 function money(value: number | null) {
   if (value == null) return '—'
   return `${value.toLocaleString('ru-BY', { maximumFractionDigits: 0 })} Br`
+}
+
+function priceDelta(item: Listing) {
+  if (item.priceByn == null || item.prevPriceByn == null || item.priceByn === item.prevPriceByn) return null
+  return item.priceByn - item.prevPriceByn
+}
+
+function deltaText(diff: number) {
+  const abs = Math.abs(diff).toLocaleString('ru-BY', { maximumFractionDigits: 0 })
+  return `${diff > 0 ? '+' : '−'}${abs} Br`
+}
+
+function listingFromChange(change: ParseChange): Listing {
+  return {
+    id: change.listingId || change.id,
+    sourceId: '',
+    url: change.url,
+    category: 'apartments',
+    title: change.title || change.newTitle || change.oldTitle || 'Без адреса',
+    rooms: change.newRooms ?? change.oldRooms,
+    areaM2: change.newAreaM2 ?? change.oldAreaM2,
+    priceByn: change.newPriceByn ?? change.oldPriceByn,
+    image: null,
+    active: change.action !== 'removed',
+    firstSeenAt: '',
+    lastParsedAt: '',
+    priceChange: null,
+    prevPriceByn: change.oldPriceByn,
+  }
 }
 
 function meta(item: Listing) {
@@ -164,7 +193,9 @@ export function PricesPage() {
         </button>
       </div>
 
-      {subTab === 'history' ? <ParseHistory /> : null}
+      {subTab === 'history' ? (
+        <ParseHistory onOpenListing={(change) => change.listingId && setOpenListing(listingFromChange(change))} />
+      ) : null}
 
       {subTab !== 'history' && (
       <>
@@ -224,7 +255,6 @@ export function PricesPage() {
         />
       )}
       {showInfo && <Infographic category={subTab as SubTab} onClose={() => setShowInfo(false)} />}
-      {openListing && <ListingHistory listing={openListing} onClose={() => setOpenListing(null)} />}
 
       {!ready ? null : listings.length === 0 ? (
         <div className="empty">Добавьте парсер</div>
@@ -235,22 +265,26 @@ export function PricesPage() {
           <div className="list-meta">
             Показано {filtered.length} · стр. {currentPage}/{pageCount}
           </div>
-          {visible.map((item) => (
+          {visible.map((item) => {
+            const delta = priceDelta(item)
+            return (
             <article key={item.id} className="listing-card listing-card-open" onClick={() => setOpenListing(item)}>
               <div className="info">
                 <h4>{item.title}</h4>
                 <p>{meta(item) || 'Параметры не распознаны'}</p>
                 <span className="listing-age">{ageLabel(item.firstSeenAt || item.lastParsedAt)}</span>
               </div>
-              <div
-                className={`price${
-                  item.priceChange === 'up' ? ' price-up' : item.priceChange === 'down' ? ' price-down' : ''
-                }`}
-              >
-                {money(item.priceByn)}
+              <div className="price">
+                <span>{money(item.priceByn)}</span>
+                {delta != null && (
+                  <span className={`price-delta ${delta > 0 ? 'price-up' : 'price-down'}`}>
+                    {deltaText(delta)}
+                  </span>
+                )}
               </div>
             </article>
-          ))}
+            )
+          })}
           <div className="pager">
             <button type="button" className="btn btn-ghost" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>
               Назад
@@ -271,6 +305,7 @@ export function PricesPage() {
       )}
       </>
       )}
+      {openListing && <ListingHistory listing={openListing} onClose={() => setOpenListing(null)} />}
     </section>
   )
 }

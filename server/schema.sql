@@ -58,6 +58,13 @@ create table if not exists snapshots (
   primary key (listing_id, date)
 );
 
+alter table snapshots add column if not exists price_usd numeric;
+
+create table if not exists fx_rates (
+  date date primary key,
+  usd_byn numeric not null
+);
+
 create index if not exists snapshots_date_idx on snapshots (date);
 create index if not exists snapshots_category_date_idx on snapshots (category, date);
 

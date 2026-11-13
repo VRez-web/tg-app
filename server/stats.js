@@ -1,5 +1,4 @@
 import { getListing, listAllListings, listListingChanges, listListingHistory, listSnapshots } from './store.js'
-import { bynToUsd } from './rates.js'
 
 const PERIODS = ['days', 'weeks', 'months', 'years']
 
@@ -98,7 +97,7 @@ export async function buildStats(category, usdRate, period = 'days') {
       rooms: snap.rooms ?? listing.rooms,
       areaM2: snap.areaM2 ?? listing.areaM2,
       priceByn: snap.priceByn,
-      priceUsd: bynToUsd(snap.priceByn, usdRate),
+      priceUsd: snap.priceUsd,
     }
   })
   const priced = items.filter((item) => item.priceByn != null)
@@ -107,49 +106,55 @@ export async function buildStats(category, usdRate, period = 'days') {
   const byRoomsMap = new Map()
   for (const item of priced) {
     const key = roomKey(item.rooms)
-    if (!byRoomsMap.has(key)) byRoomsMap.set(key, [])
-    byRoomsMap.get(key).push(item.priceByn)
+    if (!byRoomsMap.has(key)) byRoomsMap.set(key, { byn: [], usd: [] })
+    const bag = byRoomsMap.get(key)
+    bag.byn.push(item.priceByn)
+    if (item.priceUsd != null) bag.usd.push(item.priceUsd)
   }
   const byRooms = [...byRoomsMap.entries()]
     .sort(([a], [b]) => String(a).localeCompare(String(b), undefined, { numeric: true }))
     .map(([key, prices]) => ({
       key,
       label: roomLabel(key),
-      count: prices.length,
-      avgByn: avg(prices),
-      avgUsd: bynToUsd(avg(prices), usdRate),
+      count: prices.byn.length,
+      avgByn: avg(prices.byn),
+      avgUsd: avg(prices.usd),
     }))
 
   const byBucket = new Map()
   for (const snap of snapshots) {
     if (snap.priceByn == null) continue
     const key = bucket(snap.date, period)
-    if (!byBucket.has(key)) byBucket.set(key, [])
-    byBucket.get(key).push(snap.priceByn)
+    if (!byBucket.has(key)) byBucket.set(key, { byn: [], usd: [] })
+    const bag = byBucket.get(key)
+    bag.byn.push(snap.priceByn)
+    if (snap.priceUsd != null) bag.usd.push(snap.priceUsd)
   }
   const history = [...byBucket.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, prices]) => ({
       date,
-      avgByn: avg(prices),
-      avgUsd: bynToUsd(avg(prices), usdRate),
-      count: prices.length,
+      avgByn: avg(prices.byn),
+      avgUsd: avg(prices.usd),
+      count: prices.byn.length,
     }))
 
   const byBucketM2 = new Map()
   for (const snap of snapshots) {
     if (snap.priceByn == null || !snap.areaM2) continue
     const key = bucket(snap.date, period)
-    if (!byBucketM2.has(key)) byBucketM2.set(key, [])
-    byBucketM2.get(key).push(snap.priceByn / snap.areaM2)
+    if (!byBucketM2.has(key)) byBucketM2.set(key, { byn: [], usd: [] })
+    const bag = byBucketM2.get(key)
+    bag.byn.push(snap.priceByn / snap.areaM2)
+    if (snap.priceUsd != null) bag.usd.push(snap.priceUsd / snap.areaM2)
   }
   const historyPerM2 = [...byBucketM2.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, prices]) => ({
       date,
-      avgByn: avg(prices),
-      avgUsd: bynToUsd(avg(prices), usdRate),
-      count: prices.length,
+      avgByn: avg(prices.byn),
+      avgUsd: avg(prices.usd),
+      count: prices.byn.length,
     }))
 
   const sorted = [...priced].sort((a, b) => a.priceByn - b.priceByn)
@@ -174,9 +179,9 @@ export async function buildStats(category, usdRate, period = 'days') {
     count: items.length,
     pricedCount: priced.length,
     avgPriceByn: avg(priced.map((item) => item.priceByn)),
-    avgPriceUsd: bynToUsd(avg(priced.map((item) => item.priceByn)), usdRate),
+    avgPriceUsd: avg(priced.map((item) => item.priceUsd)),
     avgPricePerM2Byn: avg(withArea.map((item) => item.priceByn / item.areaM2)),
-    avgPricePerM2Usd: bynToUsd(avg(withArea.map((item) => item.priceByn / item.areaM2)), usdRate),
+    avgPricePerM2Usd: avg(withArea.filter((item) => item.priceUsd != null).map((item) => item.priceUsd / item.areaM2)),
     byRooms,
     cheapest: sorted.slice(0, 3).map(pick),
     expensive: sorted.slice(-3).reverse().map(pick),

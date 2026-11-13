@@ -42,6 +42,7 @@ export interface Listing {
   firstSeenAt: string
   lastParsedAt: string
   priceChange: 'up' | 'down' | null
+  prevPriceByn: number | null
 }
 
 export interface StatsItem {
